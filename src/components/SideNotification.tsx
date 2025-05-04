@@ -27,7 +27,7 @@ export function SideNotification({ isVisible }: SideNotificationProps) {
         <div>
           <p className="font-bold text-base">Emergency Alert</p>
           <p className="text-sm">
-            Fatima, your live location has been sent to 15 emergency contacts. Help is on the way.
+            Fatima your live location has been sent to 15. They'll be soon here to protect you.
           </p>
         </div>
       </div>
