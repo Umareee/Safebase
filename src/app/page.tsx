@@ -4,6 +4,7 @@
 import { AlertBar } from '@/components/AlertBar';
 import { GunshotButton } from '@/components/GunshotButton';
 // import { LocationSelector } from '@/components/LocationSelector'; // Removed import
+import { SideNotification } from '@/components/SideNotification'; // Import SideNotification
 import { useLocationAlerts } from '@/hooks/useLocationAlerts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +23,8 @@ export default function Home() {
     currentLocation,
     manuallySetLocation,
     selectedLocationName,
-    predefinedLocations
+    predefinedLocations,
+    showSideNotification // Get the new state from the hook
    } = useLocationAlerts();
 
    // State to manage visual feedback (placeholder for animation)
@@ -78,8 +80,9 @@ export default function Home() {
   return (
     <>
       <AlertBar alert={alertState} />
+      <SideNotification isVisible={showSideNotification} /> {/* Add the SideNotification */}
       <main className="flex min-h-screen flex-col items-center justify-center p-6 pt-20">
-        <h1 className="text-4xl font-bold mb-4 text-center">SafeZone</h1>
+        <h1 className="text-4xl font-bold mb-4 text-center text-primary">SafeZone</h1> {/* Made title colorful */}
 
         {/* Display Location Source */}
         <div className="mb-6 flex items-center justify-center space-x-2 text-muted-foreground">
@@ -88,26 +91,24 @@ export default function Home() {
            ) : (
              <>
                {locationSourceIcon}
-               <Badge variant="outline">{locationSourceDisplay}</Badge>
+               <Badge variant="secondary">{locationSourceDisplay}</Badge> {/* Different badge variant */}
              </>
            )}
          </div>
 
         {/* Placeholder Visual Feedback Area */}
         <div className={cn(
-          "w-32 h-32 rounded-full mb-8 flex items-center justify-center transition-colors duration-300",
-          visualFeedback === 'idle' && 'bg-muted',
-          visualFeedback === 'safe' && 'bg-green-100 text-green-700',
-          visualFeedback === 'danger' && 'bg-yellow-100 text-yellow-700 animate-pulse', // Warning pulse
-          visualFeedback === 'gunshot' && 'bg-red-100 text-red-700 animate-ping' // Gunshot ping
+          "w-32 h-32 rounded-full mb-8 flex items-center justify-center transition-all duration-500 ease-in-out transform hover:scale-105", // Added transition and hover effect
+          visualFeedback === 'idle' && 'bg-gray-200 dark:bg-gray-700', // Adjusted idle color
+          visualFeedback === 'safe' && 'bg-gradient-to-br from-green-400 to-emerald-500 text-white shadow-lg', // Safe gradient
+          visualFeedback === 'danger' && 'bg-gradient-to-br from-yellow-400 to-amber-500 text-white shadow-lg animate-pulse', // Warning gradient pulse
+          visualFeedback === 'gunshot' && 'bg-gradient-to-br from-red-500 to-rose-600 text-white shadow-xl animate-ping' // Gunshot gradient ping
         )}>
-          {visualFeedback === 'idle' && <PersonStanding className="h-16 w-16 text-muted-foreground" />}
+          {visualFeedback === 'idle' && <PersonStanding className="h-16 w-16 text-gray-500 dark:text-gray-400" />}
           {visualFeedback === 'safe' && <ShieldCheck className="h-16 w-16" />}
-          {visualFeedback === 'danger' && <Siren className="h-16 w-16" />}
-          {visualFeedback === 'gunshot' && <Siren className="h-16 w-16" />}
-          {/* This div acts as a placeholder for the walking man animation */}
-          {/* Its background color and icon change based on the safety status */}
+          {(visualFeedback === 'danger' || visualFeedback === 'gunshot') && <Siren className="h-16 w-16" />}
         </div>
+
 
         {/* Loading State */}
         {isLoading && (
@@ -118,10 +119,10 @@ export default function Home() {
              <div className="mt-6 w-full max-w-2xl">
                <Skeleton className="h-6 w-40 mb-4 mx-auto" />
                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Skeleton className="h-24 w-full" />
-                  <Skeleton className="h-24 w-full" />
-                  <Skeleton className="h-24 w-full" />
-                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-24 w-full rounded-lg" />
+                  <Skeleton className="h-24 w-full rounded-lg" />
+                  <Skeleton className="h-24 w-full rounded-lg" />
+                  <Skeleton className="h-24 w-full rounded-lg" />
                </div>
              </div>
           </div>
@@ -129,7 +130,7 @@ export default function Home() {
 
         {/* Error State */}
         {error && !isLoading && (
-          <div className="text-center text-destructive my-4 p-4 border border-destructive rounded-md bg-destructive/10 w-full max-w-md">
+          <div className="text-center text-destructive my-4 p-4 border border-destructive rounded-lg bg-destructive/10 w-full max-w-md shadow-md"> {/* Added shadow */}
             <p className="font-semibold">Error:</p>
             <p>{error}</p>
             {error.includes("denied") && (
@@ -146,7 +147,7 @@ export default function Home() {
                 <p className="text-muted-foreground text-center">Select a location or enable GPS to check for alerts.</p>
              )}
              {!alertState.type && !error && currentLocation && (
-                <p className="text-muted-foreground text-center">No active alerts for your current location.</p>
+                <p className="text-green-600 dark:text-green-400 text-center font-medium">Area clear. Stay safe!</p> // More positive safe message
              )}
 
             <GunshotButton
@@ -164,10 +165,10 @@ export default function Home() {
                     key={location.name}
                     onClick={() => manuallySetLocation(location)}
                     className={cn(
-                      "cursor-pointer transition-all hover:shadow-md",
-                      location.isDangerous && "border-destructive bg-destructive/5 text-destructive-foreground hover:bg-destructive/10",
-                      selectedLocationName === location.name && "ring-2 ring-primary shadow-lg",
-                      !location.isDangerous && selectedLocationName !== location.name && "border-border bg-card hover:bg-accent/50",
+                      "cursor-pointer transition-all hover:shadow-lg transform hover:-translate-y-1", // Enhanced hover effect
+                      location.isDangerous && "border-destructive bg-destructive/5 hover:bg-destructive/10",
+                      selectedLocationName === location.name && "ring-2 ring-offset-2 ring-primary shadow-xl", // Added offset to ring
+                      !location.isDangerous && selectedLocationName !== location.name && "border-border bg-card hover:bg-accent/70", // Slightly stronger hover for safe cards
                        !location.isDangerous && selectedLocationName === location.name && "bg-primary/10 border-primary" // Highlight selected safe location
                     )}
                     aria-pressed={selectedLocationName === location.name}
@@ -177,23 +178,20 @@ export default function Home() {
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                       <CardTitle className={cn(
                         "text-lg font-medium truncate",
-                         location.isDangerous && selectedLocationName === location.name && "text-primary-foreground", // Ensure title is readable on red selected background
-                         location.isDangerous && selectedLocationName !== location.name && "text-destructive", // Red title for dangerous unselected
+                         location.isDangerous && "text-destructive", // Always red text if dangerous
                          !location.isDangerous && "text-card-foreground" // Default card foreground
                        )}>
                          {location.name}
                       </CardTitle>
                       <MapPin className={cn(
-                        "h-5 w-5 text-muted-foreground",
-                        location.isDangerous && "text-destructive/70",
-                        selectedLocationName === location.name && location.isDangerous && "text-destructive-foreground/80",
-                        selectedLocationName === location.name && !location.isDangerous && "text-primary/80"
+                        "h-5 w-5",
+                         location.isDangerous ? "text-destructive/80" : "text-muted-foreground", // Red icon if dangerous
+                         selectedLocationName === location.name && !location.isDangerous && "text-primary/80" // Primary color icon if selected safe
                         )} />
                     </CardHeader>
                     <CardContent>
                        <p className={cn("text-xs",
-                         location.isDangerous ? "text-destructive/90" : "text-muted-foreground",
-                         selectedLocationName === location.name && location.isDangerous && "text-destructive-foreground/90" // Readable description on red selected bg
+                         location.isDangerous ? "text-destructive/90 font-semibold" : "text-muted-foreground", // Bolder text for dangerous
                         )}>
                          {location.isDangerous ? 'High-Risk Area' : 'Standard Area'}
                        </p>
@@ -215,3 +213,4 @@ export default function Home() {
     </>
   );
 }
+
