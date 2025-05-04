@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { DefinedLocation } from '@/config/locations';
 import { useState, useEffect } from 'react'; // Import useState and useEffect for client-side state
+import { getDistance } from '@/lib/locationUtils'; // Import getDistance utility
 
 export default function Home() {
   const {
@@ -64,23 +65,11 @@ export default function Home() {
      ? ('name' in currentLocation ? <MapPin className="h-4 w-4" /> : <LocateFixed className="h-4 w-4" />)
      : null;
 
-  // Helper function to get distance (simplified version, consider moving to utils)
-  // Necessary because useLocationAlerts doesn't expose the utility directly
-  function getDistance(loc1: any, loc2: any): number {
-      const R = 6371e3; // meters
-      const phi1 = (loc1.lat * Math.PI) / 180;
-      const phi2 = (loc2.lat * Math.PI) / 180;
-      const deltaPhi = ((loc2.lat - loc1.lat) * Math.PI) / 180;
-      const deltaLambda = ((loc2.lng - loc1.lng) * Math.PI) / 180;
-      const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) + Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-  }
-
   return (
     <>
       <AlertBar alert={alertState} />
-      <SideNotification isVisible={showSideNotification} /> {/* Add the SideNotification */}
+      {/* Pass the showSideNotification state to the component */}
+      <SideNotification isVisible={showSideNotification} />
       <main className="flex min-h-screen flex-col items-center justify-center p-6 pt-20">
         <h1 className="text-4xl font-bold mb-4 text-center text-primary">SafeZone</h1> {/* Made title colorful */}
 

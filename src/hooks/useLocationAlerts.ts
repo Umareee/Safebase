@@ -60,7 +60,7 @@ export function useLocationAlerts() {
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSideNotification, setShowSideNotification] = useState(false); // State for side notification
-  const isGunshotAlertActive = useRef(false); // Ref to track if gunshot alert is explicitly active
+  const isGunshotAlertActive = useRef(false); // Ref to track if gunshot alert is explicitly active (manual simulation or recent listener trigger)
   const sideNotificationTimer = useRef<NodeJS.Timeout | null>(null); // Timer for side notification
 
 
@@ -89,13 +89,15 @@ export function useLocationAlerts() {
 
   // Sets the alert based on proximity check, avoiding overwriting gunshot alert
   const updateAlertForLocation = useCallback((location: Location | null) => {
-    // If a gunshot alert was just set, don't immediately overwrite it with a location-based one
+    // If a gunshot alert was just set (manually or by listener), don't immediately overwrite it with a location-based one
     if (isGunshotAlertActive.current) {
        return;
     }
 
-    // Clear side notification if location changes or becomes safe
-     clearSideNotification();
+    // Clear side notification if location changes or becomes safe, unless it was just triggered manually
+     if (!isGunshotAlertActive.current) {
+        clearSideNotification();
+     }
 
 
     if (!location) {
@@ -154,9 +156,7 @@ export function useLocationAlerts() {
           if (isMounted) {
             setCurrentLocation(location);
             setLocationSource('gps');
-            // Important: Check alert *after* setting location state
-            // The updateAlertForLocation function will read the latest state
-            // updateAlertForLocation(location); // Check for crime alert on initial GPS fix
+            // Initial alert check will be handled by the location change useEffect
             setIsLoadingLocation(false);
           }
         })
@@ -165,9 +165,11 @@ export function useLocationAlerts() {
             console.error("Geolocation error:", err);
             setError(err.message || "Could not retrieve location via GPS.");
             setIsLoadingLocation(false);
+            // Clear crime alert if location fails
             if (alertState.type === 'crime') {
                setAlertState({ type: null, message: '' });
             }
+             clearSideNotification(); // Ensure side notification is cleared on error
           }
         });
     } else {
@@ -179,13 +181,13 @@ export function useLocationAlerts() {
        isMounted = false;
        clearSideNotification();
     };
-  // Run only once on mount
+  // Run only once on mount or if location source changes away from manual
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [locationSource]);
 
   // Update alert whenever location changes
   useEffect(() => {
-      // Don't update location alert immediately after a gunshot simulation
+      // Don't update location alert immediately after a gunshot simulation or listener trigger
       if (!isGunshotAlertActive.current) {
            updateAlertForLocation(currentLocation);
       }
@@ -196,10 +198,10 @@ export function useLocationAlerts() {
   const manuallySetLocation = useCallback((location: DefinedLocation) => {
     setError(null);
     setIsLoadingLocation(false);
+    isGunshotAlertActive.current = false; // Manual selection overrides any active gunshot intention
+    clearSideNotification(); // Clear side notification on manual change
     setCurrentLocation(location); // This triggers the useEffect above to update alert
     setLocationSource('manual');
-    isGunshotAlertActive.current = false; // Manual selection overrides gunshot alert intention
-    clearSideNotification(); // Clear side notification on manual change
 
     // No need to call updateAlertForLocation here, the useEffect handles it
   }, [clearSideNotification]);
@@ -230,6 +232,9 @@ export function useLocationAlerts() {
       sideNotificationTimer.current = setTimeout(() => {
           setShowSideNotification(false);
           sideNotificationTimer.current = null;
+          isGunshotAlertActive.current = false; // Reset flag when timer expires naturally
+          // After the notification hides, re-evaluate the location for crime alerts
+          updateAlertForLocation(currentLocation);
       }, 10000); // Show for 10 seconds
 
 
@@ -238,12 +243,7 @@ export function useLocationAlerts() {
         timestamp: serverTimestamp(),
       });
 
-      // Reset the flag after a short delay to allow location alerts to resume if needed
-      setTimeout(() => {
-         isGunshotAlertActive.current = false;
-         // Optionally re-evaluate location alert if needed, though listener might handle it
-         // updateAlertForLocation(currentLocation);
-      }, 500); // Adjust delay as needed
+      // No need for the extra timeout to reset the flag here, the main timer handles it.
 
     } catch (err) {
       console.error("Error simulating gunshot:", err);
@@ -251,7 +251,7 @@ export function useLocationAlerts() {
       isGunshotAlertActive.current = false; // Ensure flag is reset on error
       clearSideNotification(); // Clear side notification on error
     }
-  }, [currentLocation, clearSideNotification]); // Removed updateAlertForLocation from dependencies
+  }, [currentLocation, clearSideNotification, updateAlertForLocation]);
 
 
   // Listen for the latest gunshot event
@@ -261,7 +261,7 @@ export function useLocationAlerts() {
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       // Read the state *inside* the callback to get the latest value
       const currentType = alertState.type;
-      const isSideNotificationCurrentlyVisible = showSideNotification; // Capture current state
+      const isManualSimulationActive = isGunshotAlertActive.current; // Check if manual simulation just happened
 
       if (!querySnapshot.empty) {
         const latestEvent = querySnapshot.docs[0].data() as GunshotEvent;
@@ -276,40 +276,46 @@ export function useLocationAlerts() {
                 isNearby = distance < 1000; // 1km radius
             }
 
-            if (isNearby && currentType !== 'gunshot') {
+            // If the event is nearby AND there isn't already a gunshot alert active
+            // AND it wasn't just manually triggered (listener shouldn't override manual trigger visuals immediately)
+            if (isNearby && currentType !== 'gunshot' && !isManualSimulationActive) {
                  isGunshotAlertActive.current = true; // Set flag as listener detected gunshot
                  setAlertState({
                     type: 'gunshot',
                     message: '🔫 Gunshot detected nearby! Take cover!',
                  });
-                 // Show side notification if not already shown by simulation
-                 if (!isSideNotificationCurrentlyVisible) {
-                     setShowSideNotification(true);
-                      if (sideNotificationTimer.current) clearTimeout(sideNotificationTimer.current);
-                      sideNotificationTimer.current = setTimeout(() => {
-                           setShowSideNotification(false);
-                           sideNotificationTimer.current = null;
-                      }, 10000); // Show for 10 seconds
-                 }
+                 // Show side notification triggered by listener
+                 setShowSideNotification(true);
+                  if (sideNotificationTimer.current) clearTimeout(sideNotificationTimer.current);
+                  sideNotificationTimer.current = setTimeout(() => {
+                       setShowSideNotification(false);
+                       sideNotificationTimer.current = null;
+                       isGunshotAlertActive.current = false; // Reset flag when timer expires
+                       updateAlertForLocation(currentLocation); // Check location after notification hides
+                  }, 10000); // Show for 10 seconds
 
-                 // Reset flag after a short delay
-                 setTimeout(() => { isGunshotAlertActive.current = false; }, 500);
-            } else if (!isNearby && (currentType === 'gunshot' || isSideNotificationCurrentlyVisible)) {
-                 isGunshotAlertActive.current = false; // Clear flag as gunshot is not nearby
+            } else if (!isNearby && currentType === 'gunshot' && !isManualSimulationActive) {
+                 // Event is recent but NOT nearby, and we have a gunshot alert active
+                 // (and it wasn't just manually triggered). Clear the alert and notification.
+                 isGunshotAlertActive.current = false; // Clear flag
                  clearSideNotification(); // Hide side notification
                  updateAlertForLocation(currentLocation); // Revert to location-based alert
             }
-            // Case: isNearby and currentType is 'gunshot' -> Do nothing, already alerted.
-            // Case: !isNearby and currentType is not 'gunshot' -> Do nothing.
+            // Cases handled implicitly:
+            // - isNearby and currentType is 'gunshot' -> Do nothing, already alerted.
+            // - !isNearby and currentType is not 'gunshot' -> Do nothing.
+            // - isManualSimulationActive is true -> Do nothing, let the manual simulation timer handle things.
 
-        } else if (currentType === 'gunshot' || isSideNotificationCurrentlyVisible) {
+        } else if (currentType === 'gunshot' && !isManualSimulationActive) {
           // Latest event is OLD, clear the gunshot alert and side notification if active
+          // (and it wasn't manually triggered)
           isGunshotAlertActive.current = false;
           clearSideNotification();
           updateAlertForLocation(currentLocation); // Revert to location-based alert
         }
-      } else if (currentType === 'gunshot' || isSideNotificationCurrentlyVisible) {
+      } else if (currentType === 'gunshot' && !isManualSimulationActive) {
         // No gunshot events, clear the gunshot alert and side notification if active
+        // (and it wasn't manually triggered)
         isGunshotAlertActive.current = false;
         clearSideNotification();
         updateAlertForLocation(currentLocation); // Revert to location-based alert
@@ -320,11 +326,9 @@ export function useLocationAlerts() {
     });
 
     return () => unsubscribe();
-  // Dependencies: currentLocation triggers re-check of proximity.
-  // alertState.type isn't strictly needed here as we read it inside, but include updateAlertForLocation
-  // to ensure the callback is fresh if its definition changes. Add showSideNotification for reading state.
+  // Dependencies: Include all states and functions used inside the effect that might change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentLocation, updateAlertForLocation, alertState.type, showSideNotification, clearSideNotification]);
+  }, [currentLocation, updateAlertForLocation, alertState.type, clearSideNotification]); // isGunshotAlertActive.current is intentionally omitted as it's a ref
 
   const selectedLocationName = (currentLocation && 'name' in currentLocation) ? currentLocation.name : null;
 
