@@ -34,3 +34,4 @@ export function SideNotification({ isVisible }: SideNotificationProps) {
     </div>
   );
 }
+
