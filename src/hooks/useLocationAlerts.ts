@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, addDoc, serverTimestamp, onSnapshot, query, limit, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { getCurrentLocation as getGeoLocation } from '@/services/geolocation';
@@ -59,51 +59,67 @@ export function useLocationAlerts() {
   const [alertState, setAlertState] = useState<AlertState>({ type: null, message: '' });
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isGunshotAlertActive = useRef(false); // Ref to track if gunshot alert is explicitly active
+
 
   // --- Location Handling ---
 
   // Checks if the given location is within the radius of any predefined dangerous location
-  const checkProximityToDanger = useCallback((location: Location): boolean => {
+  const checkProximityToDanger = useCallback((location: Location): { isNear: boolean; name?: string } => {
     for (const dangerousSpot of PREDEFINED_LOCATIONS.filter(l => l.isDangerous)) {
       const distance = getDistance(location, dangerousSpot);
       if (distance <= DANGER_CHECK_RADIUS) {
-        return true;
+        return { isNear: true, name: dangerousSpot.name }; // Return name for potentially better messages
       }
     }
-    return false;
+    return { isNear: false };
   }, []);
 
-  // Sets the alert based on proximity check
+  // Sets the alert based on proximity check, avoiding overwriting gunshot alert
   const updateAlertForLocation = useCallback((location: Location | null) => {
-    // Store the current alert type before potentially changing it
-    const previousAlertType = alertState.type;
+    // If a gunshot alert was just set, don't immediately overwrite it with a location-based one
+    if (isGunshotAlertActive.current) {
+       return;
+    }
 
     if (!location) {
-      // If location is lost or unavailable, clear crime alerts. Gunshot alerts are handled separately.
-      if (previousAlertType === 'crime') {
+      // If location is lost or unavailable, clear only crime alerts.
+      if (alertState.type === 'crime') {
         setAlertState({ type: null, message: '' });
       }
       return;
     }
 
-    const isNearDanger = checkProximityToDanger(location);
+    let dangerCheckResult: { isNear: boolean; name?: string };
+    let locationName: string | null = null;
 
-    if (isNearDanger) {
-      // Only set crime alert if not currently showing a gunshot alert (let gunshot take precedence)
-      if (previousAlertType !== 'gunshot') {
-         setAlertState({
-           type: 'crime',
-           message: '🚨 Entering a high-risk area. Stay alert!',
-         });
-      }
+    if ('name' in location) { // Manually selected DefinedLocation
+        dangerCheckResult = { isNear: location.isDangerous, name: location.name };
+        locationName = location.name;
+    } else { // GPS Location
+        dangerCheckResult = checkProximityToDanger(location);
+    }
+
+
+    if (dangerCheckResult.isNear) {
+        let message = `🚨 Entering a high-risk area. Stay alert!`;
+        if(locationName) {
+            message = `🚨 Selected location "${locationName}" is a high-risk area. Stay alert!`;
+        } else if (dangerCheckResult.name) {
+            // If GPS location is near a named dangerous spot
+             message = `🚨 Near high-risk area "${dangerCheckResult.name}". Stay alert!`;
+        }
+        setAlertState({ type: 'crime', message });
     } else {
       // If not near danger and current alert is 'crime', clear it.
-      if (previousAlertType === 'crime') {
+      // Also clears if current alert is null (safe state)
+      if (alertState.type === 'crime' || alertState.type === null) {
         setAlertState({ type: null, message: '' });
       }
+      // Do not clear gunshot alerts here. They are cleared by the listener or manual selection.
     }
-   // Gunshot alert clearing is handled by the listener or manual location change
-  }, [alertState.type, checkProximityToDanger]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alertState.type, checkProximityToDanger]); // Dependency on alertState.type ensures it runs when alert changes
 
 
   // Fetch initial GPS location
@@ -119,7 +135,9 @@ export function useLocationAlerts() {
           if (isMounted) {
             setCurrentLocation(location);
             setLocationSource('gps');
-            updateAlertForLocation(location); // Check for crime alert on initial GPS fix
+            // Important: Check alert *after* setting location state
+            // The updateAlertForLocation function will read the latest state
+            // updateAlertForLocation(location); // Check for crime alert on initial GPS fix
             setIsLoadingLocation(false);
           }
         })
@@ -128,49 +146,41 @@ export function useLocationAlerts() {
             console.error("Geolocation error:", err);
             setError(err.message || "Could not retrieve location via GPS.");
             setIsLoadingLocation(false);
-             // Clear location-based alerts if GPS fails
             if (alertState.type === 'crime') {
                setAlertState({ type: null, message: '' });
             }
           }
         });
     } else {
-       // If location is already set (e.g., manually), don't show loading
        setIsLoadingLocation(false);
-       // If manually set, the alert was already handled by manuallySetLocation
     }
 
     return () => {
       isMounted = false;
     };
-  // Run only once on mount, dependencies removed to prevent re-fetching GPS on alert changes
+  // Run only once on mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Function to manually set location from buttons
-  const manuallySetLocation = useCallback((location: DefinedLocation) => {
-    setError(null); // Clear errors
-    setIsLoadingLocation(false); // Stop loading indicator
-    setCurrentLocation(location);
-    setLocationSource('manual');
+  // Update alert whenever location changes
+  useEffect(() => {
+      // Don't update location alert immediately after a gunshot simulation
+      if (!isGunshotAlertActive.current) {
+           updateAlertForLocation(currentLocation);
+      }
+  }, [currentLocation, updateAlertForLocation]);
 
-    // Update alert based ONLY on the manually selected location's danger status or proximity
-    // Overwrites any existing alert (including gunshot).
-    if (location.isDangerous) {
-        setAlertState({
-            type: 'crime',
-            message: `🚨 Selected location "${location.name}" is a high-risk area. Stay alert!`,
-        });
-    } else if (checkProximityToDanger(location)) {
-         setAlertState({
-           type: 'crime',
-           message: `🚨 Selected location "${location.name}" is near a high-risk area. Stay alert!`,
-         });
-    }
-     else {
-        setAlertState({ type: null, message: '' }); // Safe location selected
-    }
-  }, [checkProximityToDanger]);
+
+  // Function to manually set location from buttons/cards
+  const manuallySetLocation = useCallback((location: DefinedLocation) => {
+    setError(null);
+    setIsLoadingLocation(false);
+    setCurrentLocation(location); // This triggers the useEffect above to update alert
+    setLocationSource('manual');
+    isGunshotAlertActive.current = false; // Manual selection overrides gunshot alert intention
+
+    // No need to call updateAlertForLocation here, the useEffect handles it
+  }, []);
 
 
   // --- Gunshot Simulation and Listener ---
@@ -181,86 +191,91 @@ export function useLocationAlerts() {
       return;
     }
     try {
-      setError(null); // Clear previous errors
-      playGunshotSound(); // Play sound effect
+      setError(null);
+      playGunshotSound();
 
-      // Immediately set the gunshot alert state for instant feedback
+      // Set flag *before* setting state
+      isGunshotAlertActive.current = true;
       setAlertState({
           type: 'gunshot',
           message: '🔫 Gunshot detected nearby! Take cover!',
       });
 
-      // Record the event in Firestore (listener might update/clear later if needed)
       await addDoc(collection(db, 'gunshotEvents'), {
-        // Ensure we only store lat/lng, not the name or isDangerous flag
         location: { lat: currentLocation.lat, lng: currentLocation.lng },
         timestamp: serverTimestamp(),
       });
 
+      // Reset the flag after a short delay to allow location alerts to resume if needed
+      setTimeout(() => {
+         isGunshotAlertActive.current = false;
+         // Optionally re-evaluate location alert if needed, though listener might handle it
+         // updateAlertForLocation(currentLocation);
+      }, 500); // Adjust delay as needed
+
     } catch (err) {
       console.error("Error simulating gunshot:", err);
       setError("Failed to simulate gunshot event.");
-      // Optionally revert the alert state if Firestore write fails
-      // For now, we keep the immediate alert shown to the user.
-      // updateAlertForLocation(currentLocation); // Revert to location-based alert if needed
+      isGunshotAlertActive.current = false; // Ensure flag is reset on error
     }
-  }, [currentLocation]);
+  }, [currentLocation]); // Removed updateAlertForLocation from dependencies
 
 
-  // Listen for the latest gunshot event (primarily for other users or persistence)
+  // Listen for the latest gunshot event
   useEffect(() => {
     const q = query(collection(db, 'gunshotEvents'), orderBy('timestamp', 'desc'), limit(1));
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const currentAlertType = alertState.type; // Get current alert type *before* potentially changing it
+      // Read the state *inside* the callback to get the latest value
+      const currentType = alertState.type;
 
       if (!querySnapshot.empty) {
         const latestEvent = querySnapshot.docs[0].data() as GunshotEvent;
         const eventTimestamp = (latestEvent.timestamp as any)?.toDate()?.getTime();
         const now = Date.now();
-
-        // Adjust the time window as needed (e.g., 60000ms = 1 minute)
-        const isRecent = eventTimestamp && now - eventTimestamp < 60000;
+        const isRecent = eventTimestamp && now - eventTimestamp < 60000; // 1 minute window
 
         if (isRecent) {
-            // Check proximity if a current location is set
-            let isNearby = true; // Assume nearby if no location context (shouldn't happen often)
+            let isNearby = true;
             if (currentLocation) {
                 const distance = getDistance(currentLocation, latestEvent.location);
-                // Adjust proximity radius for gunshot alerts as needed
-                isNearby = distance < 1000; // e.g., 1km
+                isNearby = distance < 1000; // 1km radius
             }
 
-            if (isNearby && currentAlertType !== 'gunshot') {
-                 // If a recent, nearby gunshot is detected by the listener and we're *not* already showing one
-                 // (e.g., triggered by another user), show the alert.
+            if (isNearby && currentType !== 'gunshot') {
+                 isGunshotAlertActive.current = true; // Set flag as listener detected gunshot
                  setAlertState({
                     type: 'gunshot',
                     message: '🔫 Gunshot detected nearby! Take cover!',
                  });
-            } else if (!isNearby && currentAlertType === 'gunshot') {
-                // Gunshot event is recent but NOT nearby, clear gunshot alert if it's currently shown
+                 // Reset flag after a short delay
+                 setTimeout(() => { isGunshotAlertActive.current = false; }, 500);
+            } else if (!isNearby && currentType === 'gunshot') {
+                 isGunshotAlertActive.current = false; // Clear flag as gunshot is not nearby
                  updateAlertForLocation(currentLocation); // Revert to location-based alert
             }
-            // If it's recent, nearby, AND already showing gunshot alert, do nothing (avoid flicker)
+            // Case: isNearby and currentType is 'gunshot' -> Do nothing, already alerted.
+            // Case: !isNearby and currentType is not 'gunshot' -> Do nothing.
 
-        } else if (currentAlertType === 'gunshot') {
-          // Latest gunshot event is OLD, clear the gunshot alert if active
+        } else if (currentType === 'gunshot') {
+          // Latest event is OLD, clear the gunshot alert if active
+          isGunshotAlertActive.current = false;
           updateAlertForLocation(currentLocation); // Revert to location-based alert
         }
-      } else if (currentAlertType === 'gunshot') {
-        // No gunshot events in the database, clear the gunshot alert if active
+      } else if (currentType === 'gunshot') {
+        // No gunshot events, clear the gunshot alert if active
+        isGunshotAlertActive.current = false;
         updateAlertForLocation(currentLocation); // Revert to location-based alert
       }
     }, (err) => {
       console.error("Error listening to gunshot events:", err);
-      // Don't set error state here to avoid overwriting user-facing errors like geolocation denial
-      // setError("Failed to listen for alerts.");
     });
 
-    return () => unsubscribe(); // Cleanup listener on unmount
-  // Re-run listener if the current location changes or the way we update alerts changes
-  }, [currentLocation, alertState.type, updateAlertForLocation]);
+    return () => unsubscribe();
+  // Dependencies: currentLocation triggers re-check of proximity.
+  // alertState.type isn't strictly needed here as we read it inside, but include updateAlertForLocation
+  // to ensure the callback is fresh if its definition changes.
+  }, [currentLocation, updateAlertForLocation, alertState.type]);
 
   const selectedLocationName = (currentLocation && 'name' in currentLocation) ? currentLocation.name : null;
 

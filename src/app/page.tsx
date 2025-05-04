@@ -3,11 +3,15 @@
 
 import { AlertBar } from '@/components/AlertBar';
 import { GunshotButton } from '@/components/GunshotButton';
-import { LocationSelector } from '@/components/LocationSelector'; // Import LocationSelector
+// import { LocationSelector } from '@/components/LocationSelector'; // Removed import
 import { useLocationAlerts } from '@/hooks/useLocationAlerts';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge'; // Import Badge
-import { LocateFixed, MapPin } from 'lucide-react'; // Icons for location source
+import { Badge } from '@/components/ui/badge';
+import { LocateFixed, MapPin, PersonStanding, Siren, ShieldCheck } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; // Import Card components
+import { cn } from '@/lib/utils';
+import type { DefinedLocation } from '@/config/locations';
+import { useState, useEffect } from 'react'; // Import useState and useEffect for client-side state
 
 export default function Home() {
   const {
@@ -15,11 +19,39 @@ export default function Home() {
     simulateGunshot,
     isLoading,
     error,
-    currentLocation, // Get current location
-    manuallySetLocation, // Get function to set location
-    selectedLocationName, // Name of selected predefined location
-    predefinedLocations // List of locations for the selector
+    currentLocation,
+    manuallySetLocation,
+    selectedLocationName,
+    predefinedLocations
    } = useLocationAlerts();
+
+   // State to manage visual feedback (placeholder for animation)
+   const [visualFeedback, setVisualFeedback] = useState<'safe' | 'danger' | 'gunshot' | 'idle'>('idle');
+
+   useEffect(() => {
+     if (alertState.type === 'gunshot') {
+       setVisualFeedback('gunshot');
+     } else if (alertState.type === 'crime') {
+       setVisualFeedback('danger');
+     } else if (currentLocation) {
+       // Check if the currently selected location (manual or GPS resolved) is dangerous
+       const currentIsDangerous = 'name' in currentLocation
+         ? currentLocation.isDangerous // Manually selected DefinedLocation
+         : predefinedLocations.some(loc => // Check proximity for GPS
+             loc.isDangerous &&
+             getDistance(currentLocation, loc) <= 500 // Use a reasonable proximity check
+           );
+
+        if (currentIsDangerous) {
+             setVisualFeedback('danger');
+        } else {
+             setVisualFeedback('safe');
+        }
+     } else {
+       setVisualFeedback('idle');
+     }
+   }, [alertState.type, currentLocation, predefinedLocations]);
+
 
    // Determine location source for display
    const locationSourceDisplay = currentLocation
@@ -30,10 +62,23 @@ export default function Home() {
      ? ('name' in currentLocation ? <MapPin className="h-4 w-4" /> : <LocateFixed className="h-4 w-4" />)
      : null;
 
+  // Helper function to get distance (simplified version, consider moving to utils)
+  // Necessary because useLocationAlerts doesn't expose the utility directly
+  function getDistance(loc1: any, loc2: any): number {
+      const R = 6371e3; // meters
+      const phi1 = (loc1.lat * Math.PI) / 180;
+      const phi2 = (loc2.lat * Math.PI) / 180;
+      const deltaPhi = ((loc2.lat - loc1.lat) * Math.PI) / 180;
+      const deltaLambda = ((loc2.lng - loc1.lng) * Math.PI) / 180;
+      const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) + Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+  }
+
   return (
     <>
       <AlertBar alert={alertState} />
-      <main className="flex min-h-screen flex-col items-center justify-center p-6 pt-20"> {/* Added padding-top */}
+      <main className="flex min-h-screen flex-col items-center justify-center p-6 pt-20">
         <h1 className="text-4xl font-bold mb-4 text-center">SafeZone</h1>
 
         {/* Display Location Source */}
@@ -48,20 +93,35 @@ export default function Home() {
            )}
          </div>
 
+        {/* Placeholder Visual Feedback Area */}
+        <div className={cn(
+          "w-32 h-32 rounded-full mb-8 flex items-center justify-center transition-colors duration-300",
+          visualFeedback === 'idle' && 'bg-muted',
+          visualFeedback === 'safe' && 'bg-green-100 text-green-700',
+          visualFeedback === 'danger' && 'bg-yellow-100 text-yellow-700 animate-pulse', // Warning pulse
+          visualFeedback === 'gunshot' && 'bg-red-100 text-red-700 animate-ping' // Gunshot ping
+        )}>
+          {visualFeedback === 'idle' && <PersonStanding className="h-16 w-16 text-muted-foreground" />}
+          {visualFeedback === 'safe' && <ShieldCheck className="h-16 w-16" />}
+          {visualFeedback === 'danger' && <Siren className="h-16 w-16" />}
+          {visualFeedback === 'gunshot' && <Siren className="h-16 w-16" />}
+          {/* This div acts as a placeholder for the walking man animation */}
+          {/* Its background color and icon change based on the safety status */}
+        </div>
 
         {/* Loading State */}
         {isLoading && (
            <div className="text-center text-muted-foreground flex flex-col items-center space-y-4 w-full max-w-md">
              <p>Fetching your location and checking for alerts...</p>
-             <Skeleton className="h-12 w-full" /> {/* Skeleton for gunshot button */}
-             {/* Skeleton for location selector */}
-             <div className="mt-6 w-full">
+             <Skeleton className="h-12 w-full max-w-xs" /> {/* Skeleton for gunshot button */}
+             {/* Skeleton for location cards */}
+             <div className="mt-6 w-full max-w-2xl">
                <Skeleton className="h-6 w-40 mb-4 mx-auto" />
                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-24 w-full" />
                </div>
              </div>
           </div>
@@ -72,7 +132,6 @@ export default function Home() {
           <div className="text-center text-destructive my-4 p-4 border border-destructive rounded-md bg-destructive/10 w-full max-w-md">
             <p className="font-semibold">Error:</p>
             <p>{error}</p>
-            {/* Provide guidance if location permission is denied */}
             {error.includes("denied") && (
               <p className="mt-2 text-sm">Please enable location services in your browser settings to use GPS-based alerts.</p>
             )}
@@ -81,7 +140,7 @@ export default function Home() {
 
         {/* Loaded State */}
         {!isLoading && (
-          <div className="flex flex-col items-center space-y-8 w-full max-w-md">
+          <div className="flex flex-col items-center space-y-8 w-full max-w-2xl">
              {/* Display status message if no alert and no error */}
              {!alertState.type && !error && !currentLocation && (
                 <p className="text-muted-foreground text-center">Select a location or enable GPS to check for alerts.</p>
@@ -92,15 +151,63 @@ export default function Home() {
 
             <GunshotButton
               onSimulate={simulateGunshot}
-              disabled={!currentLocation} // Disable if no location is set
+              disabled={!currentLocation}
               aria-label="Simulate Gunshot Event at Current Location"
             />
 
-            <LocationSelector
+            {/* Location Cards Section */}
+            <div className="mt-6 w-full">
+              <h2 className="text-xl font-semibold mb-4 text-center">Select Location</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {predefinedLocations.map((location) => (
+                  <Card
+                    key={location.name}
+                    onClick={() => manuallySetLocation(location)}
+                    className={cn(
+                      "cursor-pointer transition-all hover:shadow-md",
+                      location.isDangerous && "border-destructive bg-destructive/5 text-destructive-foreground hover:bg-destructive/10",
+                      selectedLocationName === location.name && "ring-2 ring-primary shadow-lg",
+                      !location.isDangerous && selectedLocationName !== location.name && "border-border bg-card hover:bg-accent/50",
+                       !location.isDangerous && selectedLocationName === location.name && "bg-primary/10 border-primary" // Highlight selected safe location
+                    )}
+                    aria-pressed={selectedLocationName === location.name}
+                    tabIndex={0} // Make it focusable
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') manuallySetLocation(location); }} // Keyboard accessibility
+                  >
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className={cn(
+                        "text-lg font-medium truncate",
+                         location.isDangerous && selectedLocationName === location.name && "text-primary-foreground", // Ensure title is readable on red selected background
+                         location.isDangerous && selectedLocationName !== location.name && "text-destructive", // Red title for dangerous unselected
+                         !location.isDangerous && "text-card-foreground" // Default card foreground
+                       )}>
+                         {location.name}
+                      </CardTitle>
+                      <MapPin className={cn(
+                        "h-5 w-5 text-muted-foreground",
+                        location.isDangerous && "text-destructive/70",
+                        selectedLocationName === location.name && location.isDangerous && "text-destructive-foreground/80",
+                        selectedLocationName === location.name && !location.isDangerous && "text-primary/80"
+                        )} />
+                    </CardHeader>
+                    <CardContent>
+                       <p className={cn("text-xs",
+                         location.isDangerous ? "text-destructive/90" : "text-muted-foreground",
+                         selectedLocationName === location.name && location.isDangerous && "text-destructive-foreground/90" // Readable description on red selected bg
+                        )}>
+                         {location.isDangerous ? 'High-Risk Area' : 'Standard Area'}
+                       </p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* <LocationSelector
               locations={predefinedLocations}
               onSelectLocation={manuallySetLocation}
               selectedLocationName={selectedLocationName}
-            />
+            /> */}
           </div>
         )}
 

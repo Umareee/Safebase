@@ -100,3 +100,24 @@ body {
 .text-warning-foreground {
   color: hsl(var(--warning-foreground));
 }
+
+/* Add Tailwind animation keyframes if not already present */
+@layer utilities {
+  @keyframes ping {
+    75%, 100% {
+      transform: scale(1.5); /* Increased scale for more visibility */
+      opacity: 0;
+    }
+  }
+  @keyframes pulse {
+    50% {
+      opacity: .6; /* Slightly more subtle pulse */
+    }
+  }
+  .animate-ping {
+    animation: ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite; /* Slightly slower ping */
+  }
+  .animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
